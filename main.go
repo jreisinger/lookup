@@ -44,14 +44,27 @@ Usage:
 	}
 	wg.Wait()
 
-	printSummaryAndExit(&stats)
+	log.Printf("failed response from %d out of %d servers (%.2f%%)\n",
+		stats.failedResponses, stats.totalResponses(), stats.failedPercentage())
+
+	if stats.failedPercentage() > 10 {
+		os.Exit(1)
+	}
 }
 
 // Stats holds statistics about DNS responses.
 type Stats struct {
 	sync.Mutex
-	okResponses         int
-	failedResponsesFrom []string
+	okResponses     int
+	failedResponses int
+}
+
+func (s *Stats) failedPercentage() float64 {
+	return float64(s.failedResponses) / float64(s.totalResponses()) * 100
+}
+
+func (s *Stats) totalResponses() int {
+	return s.failedResponses + s.okResponses
 }
 
 func getNameservers() []string {
@@ -88,17 +101,6 @@ func dedup(in []string) []string {
 	return out
 }
 
-func printSummaryAndExit(stats *Stats) {
-	failed := len(stats.failedResponsesFrom)
-	total := failed + stats.okResponses
-	failedPercentage := float64(len(stats.failedResponsesFrom)) / float64(total) * 100
-	log.Printf("failed response from %d out of %d servers (%.2f%%) %s\n",
-		failed, total, failedPercentage, strings.Join(stats.failedResponsesFrom, ", "))
-	if failedPercentage > 10 {
-		os.Exit(1)
-	}
-}
-
 func lookupAt(server, fqdn string, stats *Stats) {
 	c := new(dns.Client)
 
@@ -106,12 +108,12 @@ func lookupAt(server, fqdn string, stats *Stats) {
 	m.SetQuestion(dns.Fqdn(fqdn), dns.TypeA)
 	m.RecursionDesired = true
 
-	msg := fmt.Sprintf("lookup at %-15s ", server)
-
 	r, _, _ := c.Exchange(m, net.JoinHostPort(server, "53"))
-	if r == nil { // no response from the server
+	if r == nil { // ignore servers that don't respond
 		return
 	}
+
+	msg := fmt.Sprintf("lookup at %-15s ", server)
 
 	if r.Rcode != dns.RcodeSuccess {
 		// ignore server issues
@@ -119,9 +121,9 @@ func lookupAt(server, fqdn string, stats *Stats) {
 			return
 		}
 		stats.Lock()
-		stats.failedResponsesFrom = append(stats.failedResponsesFrom, server)
+		stats.failedResponses++
 		stats.Unlock()
-		log.Println(msg + "ERR")
+		log.Println(msg + "FAIL")
 		return
 	}
 
