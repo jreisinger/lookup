@@ -28,8 +28,6 @@ func main() {
 	var stats Stats
 	var servers Nameservers
 
-	servers.add("1.1.1.1", "8.8.8.8", "8.8.4.4")
-
 	if err := servers.getLocal(); err != nil {
 		log.Printf("getting local nameservers: %v\n", err)
 	}
@@ -37,6 +35,10 @@ func main() {
 	if err := servers.getPublic("https://public-dns.info/nameservers.txt"); err != nil {
 		log.Printf("getting public nameservers: %v\n", err)
 	}
+
+	// Add couple of reliable public nameservers.
+	servers.add("1.1.1.1", "8.8.8.8", "8.8.4.4")
+	servers.dedup()
 
 	var wg sync.WaitGroup
 	for _, server := range servers {
@@ -76,6 +78,19 @@ type Nameservers []string
 
 func (n *Nameservers) add(servers ...string) {
 	*n = append(*n, servers...)
+}
+
+func (n *Nameservers) dedup() {
+	orig := *n
+	*n = []string{} // empty the slice
+	seen := make(map[string]struct{})
+	for _, s := range orig {
+		if _, ok := seen[s]; ok {
+			continue
+		}
+		seen[s] = struct{}{}
+		*n = append(*n, s)
+	}
 }
 
 func (n *Nameservers) getLocal() error {
