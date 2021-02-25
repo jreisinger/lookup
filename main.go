@@ -17,34 +17,38 @@ import (
 func main() {
 	progName := os.Args[0]
 
-	if len(os.Args[1:]) != 1 {
-		help := fmt.Sprintf(`Lookup FQDN at many public DNS servers.
-
-Usage:
-  %s FQDN`, progName)
-		fmt.Println(help)
-		os.Exit(0)
-	}
-
 	log.SetPrefix(progName + ": ")
 	log.SetFlags(0) // no timestamp
 
-	fqdn := os.Args[1]
-	servers := getNameservers()
-	var stats Stats
+	if len(os.Args[1:]) != 1 {
+		log.Fatalln("missing FQDN to lookup")
+	}
 
-	// Run lookups concurrently.
+	fqdn := os.Args[1]
+	var stats Stats
+	var servers Nameservers
+
+	servers.add("1.1.1.1", "8.8.8.8", "8.8.4.4")
+
+	if err := servers.getLocal(); err != nil {
+		log.Printf("getting local nameservers: %v\n", err)
+	}
+
+	if err := servers.getPublic("https://public-dns.info/nameservers.txt"); err != nil {
+		log.Printf("getting public nameservers: %v\n", err)
+	}
+
 	var wg sync.WaitGroup
 	for _, server := range servers {
 		wg.Add(1)
 		go func(s string) {
-			lookupAt(s, fqdn, &stats)
+			lookup(fqdn, s, &stats)
 			wg.Done()
 		}(server)
 	}
 	wg.Wait()
 
-	log.Printf("failed response from %d out of %d servers (%.2f%%)\n",
+	fmt.Printf("failed response from %d out of %d nameservers (%.2f%%)\n",
 		stats.failedResponses, stats.totalResponses(), stats.failedPercentage())
 
 	if stats.failedPercentage() > 10 {
@@ -67,41 +71,47 @@ func (s *Stats) totalResponses() int {
 	return s.failedResponses + s.okResponses
 }
 
-func getNameservers() []string {
-	// Let's hardcode couple of reliable DNS servers.
-	servers := []string{"1.1.1.1", "8.8.8.8", "8.8.4.4"}
+// Nameservers to make lookups against.
+type Nameservers []string
 
-	// Add more DNS servers.
-	publicServers, err := fetchPublicNameservers("https://public-dns.info/nameservers.txt")
-	if err != nil {
-		log.Printf("getting public nameservers: %v\n", err)
-	}
-	servers = append(servers, publicServers...)
+func (n *Nameservers) add(servers ...string) {
+	*n = append(*n, servers...)
+}
 
-	// Add DNS servers from local config file if any.
+func (n *Nameservers) getLocal() error {
 	config, err := dns.ClientConfigFromFile("/etc/resolv.conf")
 	if err != nil {
-		log.Printf("getting local nameservers: %v\n", err)
+		return err
 	}
-	servers = append(servers, config.Servers...)
-
-	return dedup(servers)
+	*n = append(*n, config.Servers...)
+	return nil
 }
 
-func dedup(in []string) []string {
-	out := []string{}
-	seen := make(map[string]struct{})
-	for _, s := range in {
-		if _, ok := seen[s]; ok {
-			continue
+func (n *Nameservers) getPublic(url string) error {
+	client := &http.Client{Timeout: 5 * time.Second}
+	resp, err := client.Get(url)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+
+	b, err := ioutil.ReadAll(resp.Body)
+	if err != nil {
+		return err
+	}
+
+	// Select only IPv4 nameservers.
+	for _, server := range strings.Split(string(b), "\n") {
+		ipv4 := net.ParseIP(server).To4()
+		if ipv4 != nil {
+			*n = append(*n, ipv4.String())
 		}
-		out = append(out, s)
-		seen[s] = struct{}{}
 	}
-	return out
+
+	return nil
 }
 
-func lookupAt(server, fqdn string, stats *Stats) {
+func lookup(fqdn, server string, stats *Stats) {
 	c := new(dns.Client)
 
 	m := new(dns.Msg)
@@ -120,41 +130,16 @@ func lookupAt(server, fqdn string, stats *Stats) {
 		if r.Rcode == dns.RcodeRefused || r.Rcode == dns.RcodeServerFailure {
 			return
 		}
+
 		stats.Lock()
 		stats.failedResponses++
 		stats.Unlock()
-		log.Println(msg + "FAIL")
+		fmt.Println(msg + "FAIL")
 		return
 	}
 
 	stats.Lock()
 	stats.okResponses++
 	stats.Unlock()
-	log.Println(msg + "OK")
-}
-
-func fetchPublicNameservers(url string) ([]string, error) {
-	var servers []string
-
-	client := &http.Client{Timeout: 5 * time.Second}
-	resp, err := client.Get(url)
-	if err != nil {
-		return servers, err
-	}
-	defer resp.Body.Close()
-
-	b, err := ioutil.ReadAll(resp.Body)
-	if err != nil {
-		return servers, err
-	}
-
-	// Select only IPv4 nameservers.
-	for _, server := range strings.Split(string(b), "\n") {
-		ipv4 := net.ParseIP(server).To4()
-		if ipv4 != nil {
-			servers = append(servers, ipv4.String())
-		}
-	}
-
-	return servers, nil
+	fmt.Println(msg + "OK")
 }
