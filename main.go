@@ -41,14 +41,32 @@ func main() {
 	servers.dedup()
 
 	var wg sync.WaitGroup
-	for _, server := range servers {
+	serversCh := make(chan string)
+
+	// Spin up 100 workers to make lookups.
+	for i := 0; i < 100; i++ {
 		wg.Add(1)
-		go func(s string) {
-			lookup(fqdn, s, &stats)
-			wg.Done()
-		}(server)
+		go func() {
+			defer wg.Done()
+			for s := range serversCh {
+				lookup(fqdn, s, &stats)
+			}
+		}()
 	}
+
+	// Send workers servers to make lookups at.
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		defer close(serversCh)
+		for _, s := range servers {
+			serversCh <- s
+		}
+	}()
+
 	wg.Wait()
+
+	log.Printf("failed nameservers %d out of %d\n", stats.failedServers, len(servers))
 
 	fmt.Printf("failed response from %d out of %d nameservers (%.2f%%)\n",
 		stats.failedResponses, stats.totalResponses(), stats.failedPercentage())
@@ -63,6 +81,7 @@ type Stats struct {
 	sync.Mutex
 	okResponses     int
 	failedResponses int
+	failedServers   int
 }
 
 func (s *Stats) failedPercentage() float64 {
@@ -133,16 +152,31 @@ func lookup(fqdn, server string, stats *Stats) {
 	m.SetQuestion(dns.Fqdn(fqdn), dns.TypeA)
 	m.RecursionDesired = true
 
-	r, _, _ := c.Exchange(m, net.JoinHostPort(server, "53"))
-	if r == nil { // ignore servers that don't respond
+	msg := fmt.Sprintf("lookup at %-15s ", server)
+
+	r, _, err := c.Exchange(m, net.JoinHostPort(server, "53"))
+	if r == nil { // server issues
+		stats.Lock()
+		stats.failedServers++
+		stats.Unlock()
+		log.Println(msg + err.Error())
 		return
 	}
 
-	msg := fmt.Sprintf("lookup at %-15s ", server)
-
 	if r.Rcode != dns.RcodeSuccess {
-		// ignore server issues
-		if r.Rcode == dns.RcodeRefused || r.Rcode == dns.RcodeServerFailure {
+		// server issues
+		switch r.Rcode {
+		case dns.RcodeRefused:
+			stats.Lock()
+			stats.failedServers++
+			stats.Unlock()
+			log.Println(msg + "REFUSED")
+			return
+		case dns.RcodeServerFailure:
+			stats.Lock()
+			stats.failedServers++
+			stats.Unlock()
+			log.Println(msg + "SRVFAIL")
 			return
 		}
 

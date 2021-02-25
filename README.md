@@ -3,12 +3,12 @@ Lookup FQDN at many [public DNS servers](https://public-dns.info/nameservers.txt
 ```
 $ go install
 
-$ lookup golang.org
-lookup: lookup at 180.76.76.76    OK
-lookup: lookup at 201.144.183.147 OK
-lookup: lookup at 212.43.98.12    OK
+$ lookup golang.org 2> /dev/null
+lookup at 195.238.40.45   OK
+lookup at 109.228.9.40    OK
+lookup at 177.86.233.170  OK
 <...SNIP...>
-lookup: failed response from 0 out of 180 servers (0.00%)
+failed response from 0 out of 1431 nameservers (0.00%)
 
 $ echo $?
 0
