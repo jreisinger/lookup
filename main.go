@@ -167,14 +167,14 @@ func lookup(fqdn, server string, stats *Stats) {
 	m.SetQuestion(dns.Fqdn(fqdn), dns.TypeA)
 	m.RecursionDesired = true
 
-	msg := fmt.Sprintf("lookup at %-15s ", server)
+	myMsg := fmt.Sprintf("lookup at %-15s ", server)
 
 	r, _, err := c.Exchange(m, net.JoinHostPort(server, "53"))
 	if r == nil { // server issues
 		stats.Lock()
 		stats.failedServers++
 		stats.Unlock()
-		log.Println(msg + err.Error())
+		log.Println(myMsg + err.Error())
 		return
 	}
 
@@ -182,32 +182,16 @@ func lookup(fqdn, server string, stats *Stats) {
 	stats.okServers++
 	stats.Unlock()
 
-	if r.Rcode != dns.RcodeSuccess {
-		// server issues
-		switch r.Rcode {
-		case dns.RcodeRefused:
-			stats.Lock()
-			stats.failedServers++
-			stats.Unlock()
-			log.Println(msg + "REFUSED")
-			return
-		case dns.RcodeServerFailure:
-			stats.Lock()
-			stats.failedServers++
-			stats.Unlock()
-			log.Println(msg + "SRVFAIL")
-			return
-		}
-
+	if len(r.Answer) < 1 {
 		stats.Lock()
 		stats.failedResponses++
 		stats.Unlock()
-		fmt.Println(msg + "FAIL")
+		fmt.Println(myMsg + "FAIL")
 		return
 	}
 
 	stats.Lock()
 	stats.okResponses++
 	stats.Unlock()
-	fmt.Println(msg + "OK")
+	fmt.Println(myMsg + "OK")
 }
