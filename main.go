@@ -27,11 +27,9 @@ func main() {
 		log.Fatalln("missing FQDN to lookup")
 	}
 
-	fqdn := flag.Arg(0)
-	var stats Stats
 	var servers Nameservers
 
-	servers.add("1.1.1.1")            // Cloudflare
+	servers.add("1.1.1.1", "1.0.0.1") // Cloudflare
 	servers.add("8.8.8.8", "8.8.4.4") // Google
 	if err := servers.getLocal(); err != nil {
 		log.Printf("getting local nameservers: %v\n", err)
@@ -40,13 +38,15 @@ func main() {
 		log.Printf("getting public nameservers: %v\n", err)
 	}
 	servers.dedup()
-
 	if *n != 0 {
 		servers = servers[:*n]
 	}
 
 	var wg sync.WaitGroup
 	serversCh := make(chan string)
+
+	var stats Stats
+	fqdn := flag.Arg(0)
 
 	// Spin up 100 workers to make lookups.
 	for i := 0; i < 100; i++ {
