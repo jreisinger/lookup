@@ -1,4 +1,4 @@
-Lookup FQDN at many [public DNS servers](https://public-dns.info/nameservers.txt).
+Look up FQDN at many [public DNS servers](https://public-dns.info/nameservers.txt) and report success rate.
 
 ```
 $ go install
