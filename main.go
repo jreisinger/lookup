@@ -66,12 +66,13 @@ func main() {
 
 	wg.Wait()
 
-	log.Printf("failed nameservers %d out of %d\n", stats.failedServers, len(servers))
+	log.Printf("%d failed nameservers out of %d (%.2f%%)\n",
+		stats.failedServers, stats.totalServers(), stats.failedServersPercentage())
 
-	fmt.Printf("failed response from %d out of %d nameservers (%.2f%%)\n",
-		stats.failedResponses, stats.totalResponses(), stats.failedPercentage())
+	fmt.Printf("%d failed responses out of %d nameservers (%.2f%%)\n",
+		stats.failedResponses, stats.totalResponses(), stats.failedResponsesPercentage())
 
-	if stats.failedPercentage() > 10 {
+	if stats.failedResponsesPercentage() > 10 {
 		os.Exit(1)
 	}
 }
@@ -81,15 +82,24 @@ type Stats struct {
 	sync.Mutex
 	okResponses     int
 	failedResponses int
+	okServers       int
 	failedServers   int
 }
 
-func (s *Stats) failedPercentage() float64 {
+func (s *Stats) failedResponsesPercentage() float64 {
 	return float64(s.failedResponses) / float64(s.totalResponses()) * 100
 }
 
 func (s *Stats) totalResponses() int {
 	return s.failedResponses + s.okResponses
+}
+
+func (s *Stats) failedServersPercentage() float64 {
+	return float64(s.failedServers) / float64(s.totalServers()) * 100
+}
+
+func (s *Stats) totalServers() int {
+	return s.failedServers + s.okServers
 }
 
 // Nameservers to make lookups against.
@@ -162,6 +172,10 @@ func lookup(fqdn, server string, stats *Stats) {
 		log.Println(msg + err.Error())
 		return
 	}
+
+	stats.Lock()
+	stats.okServers++
+	stats.Unlock()
 
 	if r.Rcode != dns.RcodeSuccess {
 		// server issues
