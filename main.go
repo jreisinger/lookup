@@ -1,6 +1,7 @@
 package main
 
 import (
+	"flag"
 	"fmt"
 	"io/ioutil"
 	"log"
@@ -14,31 +15,35 @@ import (
 	"github.com/miekg/dns"
 )
 
-func main() {
-	progName := os.Args[0]
+var n = flag.Int("n", 0, "lookup only against first n nameservers")
 
-	log.SetPrefix(progName + ": ")
+func main() {
+	flag.Parse()
+
+	log.SetPrefix(os.Args[0] + ": ")
 	log.SetFlags(0) // no timestamp
 
-	if len(os.Args[1:]) != 1 {
+	if len(flag.Args()) < 1 {
 		log.Fatalln("missing FQDN to lookup")
 	}
 
-	fqdn := os.Args[1]
+	fqdn := flag.Arg(0)
 	var stats Stats
 	var servers Nameservers
 
+	servers.add("1.1.1.1")            // Cloudflare
+	servers.add("8.8.8.8", "8.8.4.4") // Google
 	if err := servers.getLocal(); err != nil {
 		log.Printf("getting local nameservers: %v\n", err)
 	}
-
 	if err := servers.getPublic("https://public-dns.info/nameservers.txt"); err != nil {
 		log.Printf("getting public nameservers: %v\n", err)
 	}
-
-	// Add couple of reliable public nameservers.
-	servers.add("1.1.1.1", "8.8.8.8", "8.8.4.4")
 	servers.dedup()
+
+	if *n != 0 {
+		servers = servers[:*n]
+	}
 
 	var wg sync.WaitGroup
 	serversCh := make(chan string)
@@ -66,11 +71,11 @@ func main() {
 
 	wg.Wait()
 
-	log.Printf("%d failed nameservers out of %d (%.2f%%)\n",
+	fmt.Fprintf(os.Stderr, "%d failed nameservers out of %d (%.2f%%)\n",
 		stats.failedServers, stats.totalServers(), stats.failedServersPercentage())
 
-	fmt.Printf("%d failed responses out of %d nameservers (%.2f%%)\n",
-		stats.failedResponses, stats.totalResponses(), stats.failedResponsesPercentage())
+	fmt.Printf("%d ok responses out of %d (%.2f%%)\n",
+		stats.okResponses, stats.totalResponses(), 100-stats.failedResponsesPercentage())
 
 	if stats.failedResponsesPercentage() > 10 {
 		os.Exit(1)
