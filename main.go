@@ -78,11 +78,11 @@ func main() {
 
 	wg.Wait()
 
-	fmt.Fprintf(os.Stderr, "%d failed nameservers out of %d (%.2f%%)\n",
-		stats.failedServers, stats.totalServers(), stats.failedServersPercentage())
+	fmt.Fprintf(os.Stderr, "%.0f%% (%d/%d) of nameservers failed to respond\n",
+		stats.failedServersPercentage(), stats.failedServers, stats.totalServers())
 
-	fmt.Printf("%d ok responses out of %d (%.2f%%)\n",
-		stats.okResponses, stats.totalResponses(), 100-stats.failedResponsesPercentage())
+	fmt.Printf("%.0f%% (%d/%d) of responses contained resource records\n",
+		100-stats.failedResponsesPercentage(), stats.okResponses, stats.totalResponses())
 
 	if stats.failedResponsesPercentage() > 10 {
 		os.Exit(1)
@@ -174,14 +174,12 @@ func lookup(fqdn, server string, stats *Stats, dnsType uint16) {
 	m.SetQuestion(dns.Fqdn(fqdn), dnsType)
 	m.RecursionDesired = true
 
-	myMsg := fmt.Sprintf("lookup at %-15s ", server)
-
 	r, _, err := c.Exchange(m, net.JoinHostPort(server, "53"))
 	if r == nil { // server issues
 		stats.Lock()
 		stats.failedServers++
 		stats.Unlock()
-		log.Println(myMsg + err.Error())
+		log.Printf("%s: %v", server, err.Error())
 		return
 	}
 
@@ -189,11 +187,19 @@ func lookup(fqdn, server string, stats *Stats, dnsType uint16) {
 	stats.okServers++
 	stats.Unlock()
 
-	if len(r.Answer) < 1 {
+	nRRs := len(r.Answer)
+
+	format := "response from %-15s contained %d RR"
+	if nRRs == 0 || nRRs > 1 {
+		format += "s"
+	}
+	format += "\n"
+	fmt.Printf(format, server, nRRs)
+
+	if nRRs < 1 {
 		stats.Lock()
 		stats.failedResponses++
 		stats.Unlock()
-		fmt.Println(myMsg + "FAIL")
 		return
 	}
 
@@ -205,5 +211,4 @@ func lookup(fqdn, server string, stats *Stats, dnsType uint16) {
 	stats.Lock()
 	stats.okResponses++
 	stats.Unlock()
-	fmt.Println(myMsg + "OK")
 }
