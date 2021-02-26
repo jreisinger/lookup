@@ -188,13 +188,14 @@ func lookup(fqdn, server string, stats *Stats, dnsType uint16) {
 	stats.Unlock()
 
 	nRRs := len(r.Answer)
+	rCode := dns.RcodeToString[r.Rcode]
 
 	format := "response from %-15s contained %d RR"
 	if nRRs == 0 || nRRs > 1 {
 		format += "s"
 	}
-	format += "\n"
-	fmt.Printf(format, server, nRRs)
+	format += " (%s)\n"
+	fmt.Printf(format, server, nRRs, rCode)
 
 	if nRRs < 1 {
 		stats.Lock()
