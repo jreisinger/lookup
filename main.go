@@ -15,7 +15,8 @@ import (
 	"github.com/miekg/dns"
 )
 
-var n = flag.Int("n", 0, "lookup only against first n nameservers")
+var n = flag.Int("n", 0, "look up only against first `n` nameservers")
+var t = flag.String("t", "A", "DNS `type` to look up")
 
 func main() {
 	flag.Parse()
@@ -48,13 +49,19 @@ func main() {
 	var stats Stats
 	fqdn := flag.Arg(0)
 
+	t := strings.ToUpper(*t)
+	dnsType := dns.StringToType[t]
+	if dnsType == 0 {
+		log.Fatalf("unsupported DNS type: %s", t)
+	}
+
 	// Spin up 100 workers to make lookups.
 	for i := 0; i < 100; i++ {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
 			for s := range serversCh {
-				lookup(fqdn, s, &stats)
+				lookup(fqdn, s, &stats, dnsType)
 			}
 		}()
 	}
@@ -160,11 +167,11 @@ func (n *Nameservers) getPublic(url string) error {
 	return nil
 }
 
-func lookup(fqdn, server string, stats *Stats) {
+func lookup(fqdn, server string, stats *Stats, dnsType uint16) {
 	c := new(dns.Client)
 
 	m := new(dns.Msg)
-	m.SetQuestion(dns.Fqdn(fqdn), dns.TypeA)
+	m.SetQuestion(dns.Fqdn(fqdn), dnsType)
 	m.RecursionDesired = true
 
 	myMsg := fmt.Sprintf("lookup at %-15s ", server)
@@ -189,6 +196,11 @@ func lookup(fqdn, server string, stats *Stats) {
 		fmt.Println(myMsg + "FAIL")
 		return
 	}
+
+	// var rrString []string
+	// for _, rr := range r.Answer {
+	// 	rrString = append(rrString, rr.String())
+	// }
 
 	stats.Lock()
 	stats.okResponses++
