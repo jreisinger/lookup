@@ -91,7 +91,7 @@ type Stats struct {
 }
 
 func (s *Stats) printSummary() {
-	fmt.Printf("%s\n", strings.Repeat("-", 35))
+	fmt.Printf("%s\n", strings.Repeat("-", 40))
 	format := "%-24s %2.0f%% (%d/%d)\n"
 	fmt.Printf(format, "Failed nameservers",
 		s.failedServersPercentage(), s.failedServers, s.totalServers)
