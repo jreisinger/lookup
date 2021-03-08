@@ -1,4 +1,4 @@
-Look up FQDN at many [public DNS servers][1] and report statistics.
+Look up FQDN at many [public DNS servers][1] concurrently and report statistics.
 
 ```
 $ go install
