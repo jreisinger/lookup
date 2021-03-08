@@ -22,4 +22,4 @@ Failed responses          0% (0/7)
 Empty responses           0% (0/7)
 ```
 
-[1][https://public-dns.info/nameservers.txt]
+[1]: https://public-dns.info/nameservers.txt
