@@ -83,11 +83,11 @@ func main() {
 // Stats holds statistics about DNS responses.
 type Stats struct {
 	sync.Mutex
+	totalServers    int
+	failedServers   int
 	totalResponses  int
 	failedResponses int
 	emptyResponses  int
-	totalServers    int
-	failedServers   int
 }
 
 func (s *Stats) printSummary() {
