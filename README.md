@@ -1,8 +1,10 @@
-Look up FQDN at many [public DNS servers](https://public-dns.info/nameservers.txt) and report statistics.
+Look up FQDN at many [public DNS servers][1] and report statistics.
 
 ```
 $ go install
+```
 
+```
 $ lookup -n 10 -t mx example.com
 querying 8.8.4.4         1 RR (NOERROR)
 querying 8.8.8.8         1 RR (NOERROR)
@@ -19,3 +21,5 @@ Failed nameservers       30% (3/10)
 Failed responses          0% (0/7)
 Empty responses           0% (0/7)
 ```
+
+[1][https://public-dns.info/nameservers.txt]
