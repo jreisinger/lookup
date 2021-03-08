@@ -28,6 +28,8 @@ func main() {
 		log.Fatalln("missing FQDN to lookup")
 	}
 
+	fqdn := flag.Arg(0)
+	var stats Stats
 	var servers Nameservers
 
 	servers.add("1.1.1.1", "1.0.0.1") // Cloudflare
@@ -42,12 +44,10 @@ func main() {
 	if *n != 0 {
 		servers = servers[:*n]
 	}
+	stats.totalServers = len(servers)
 
 	var wg sync.WaitGroup
 	serversCh := make(chan string)
-
-	var stats Stats
-	fqdn := flag.Arg(0)
 
 	t := strings.ToUpper(*t)
 	dnsType := dns.StringToType[t]
@@ -77,44 +77,40 @@ func main() {
 	}()
 
 	wg.Wait()
-
-	format := "%-30s %2.0f%% (%d/%d)\n"
-	fmt.Printf(format, "Failed nameservers",
-		stats.failedServersPercentage(), stats.failedServers, stats.totalServers())
-	fmt.Printf(format, "Failed responses",
-		stats.failedResponsesPercentage(), stats.failedResponses, stats.totalResponses())
-	fmt.Printf(format, "Empty responses",
-		stats.emptyResponsesPercentage(), stats.emptyResponses, stats.totalResponses()-stats.failedResponses)
+	stats.printSummary()
 }
 
 // Stats holds statistics about DNS responses.
 type Stats struct {
 	sync.Mutex
-	okResponses     int
+	totalResponses  int
 	failedResponses int
 	emptyResponses  int
-	okServers       int
+	totalServers    int
 	failedServers   int
 }
 
-func (s *Stats) failedResponsesPercentage() float64 {
-	return float64(s.failedResponses) / float64(s.totalResponses()) * 100
-}
-
-func (s *Stats) emptyResponsesPercentage() float64 {
-	return float64(s.emptyResponses) / float64(s.totalResponses()-s.failedResponses) * 100
-}
-
-func (s *Stats) totalResponses() int {
-	return s.failedResponses + s.okResponses
+func (s *Stats) printSummary() {
+	fmt.Printf("%s\n", strings.Repeat("-", 35))
+	format := "%-24s %2.0f%% (%d/%d)\n"
+	fmt.Printf(format, "Failed nameservers",
+		s.failedServersPercentage(), s.failedServers, s.totalServers)
+	fmt.Printf(format, "Failed responses",
+		s.failedResponsesPercentage(), s.failedResponses, s.totalResponses)
+	fmt.Printf(format, "Empty responses",
+		s.emptyResponsesPercentage(), s.emptyResponses, s.totalResponses-s.failedResponses)
 }
 
 func (s *Stats) failedServersPercentage() float64 {
-	return float64(s.failedServers) / float64(s.totalServers()) * 100
+	return float64(s.failedServers) / float64(s.totalServers) * 100
 }
 
-func (s *Stats) totalServers() int {
-	return s.failedServers + s.okServers
+func (s *Stats) failedResponsesPercentage() float64 {
+	return float64(s.failedResponses) / float64(s.totalResponses) * 100
+}
+
+func (s *Stats) emptyResponsesPercentage() float64 {
+	return float64(s.emptyResponses) / float64(s.totalResponses-s.failedResponses) * 100
 }
 
 // Nameservers to make lookups against.
@@ -182,12 +178,12 @@ func lookup(fqdn, server string, stats *Stats, dnsType uint16) {
 		stats.Lock()
 		stats.failedServers++
 		stats.Unlock()
-		log.Printf("%s: %v", server, err.Error())
+		fmt.Printf("querying %-15s %v\n", server, err.Error())
 		return
 	}
 
 	stats.Lock()
-	stats.okServers++
+	stats.totalResponses++
 	stats.Unlock()
 
 	nRRs := len(r.Answer)
@@ -199,7 +195,7 @@ func lookup(fqdn, server string, stats *Stats, dnsType uint16) {
 		stats.Unlock()
 	}
 
-	format := "response from %-15s contained %d RR"
+	format := "querying %-15s %d RR"
 	if nRRs == 0 || nRRs > 1 {
 		format += "s"
 	}
@@ -212,13 +208,4 @@ func lookup(fqdn, server string, stats *Stats, dnsType uint16) {
 		stats.Unlock()
 		return
 	}
-
-	// var rrString []string
-	// for _, rr := range r.Answer {
-	// 	rrString = append(rrString, rr.String())
-	// }
-
-	stats.Lock()
-	stats.okResponses++
-	stats.Unlock()
 }
