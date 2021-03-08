@@ -78,15 +78,13 @@ func main() {
 
 	wg.Wait()
 
-	fmt.Fprintf(os.Stderr, "%.0f%% (%d/%d) of nameservers failed to respond\n",
+	format := "%-30s %2.0f%% (%d/%d)\n"
+	fmt.Printf(format, "Failed nameservers",
 		stats.failedServersPercentage(), stats.failedServers, stats.totalServers())
-
-	fmt.Printf("%.0f%% (%d/%d) of responses contained resource records\n",
-		100-stats.failedResponsesPercentage(), stats.okResponses, stats.totalResponses())
-
-	if stats.failedResponsesPercentage() > 10 {
-		os.Exit(1)
-	}
+	fmt.Printf(format, "Failed responses",
+		stats.failedResponsesPercentage(), stats.failedResponses, stats.totalResponses())
+	fmt.Printf(format, "Empty responses",
+		stats.emptyResponsesPercentage(), stats.emptyResponses, stats.totalResponses()-stats.failedResponses)
 }
 
 // Stats holds statistics about DNS responses.
@@ -94,12 +92,17 @@ type Stats struct {
 	sync.Mutex
 	okResponses     int
 	failedResponses int
+	emptyResponses  int
 	okServers       int
 	failedServers   int
 }
 
 func (s *Stats) failedResponsesPercentage() float64 {
 	return float64(s.failedResponses) / float64(s.totalResponses()) * 100
+}
+
+func (s *Stats) emptyResponsesPercentage() float64 {
+	return float64(s.emptyResponses) / float64(s.totalResponses()-s.failedResponses) * 100
 }
 
 func (s *Stats) totalResponses() int {
@@ -190,6 +193,12 @@ func lookup(fqdn, server string, stats *Stats, dnsType uint16) {
 	nRRs := len(r.Answer)
 	rCode := dns.RcodeToString[r.Rcode]
 
+	if rCode != "NOERROR" {
+		stats.Lock()
+		stats.failedResponses++
+		stats.Unlock()
+	}
+
 	format := "response from %-15s contained %d RR"
 	if nRRs == 0 || nRRs > 1 {
 		format += "s"
@@ -199,7 +208,7 @@ func lookup(fqdn, server string, stats *Stats, dnsType uint16) {
 
 	if nRRs < 1 {
 		stats.Lock()
-		stats.failedResponses++
+		stats.emptyResponses++
 		stats.Unlock()
 		return
 	}
