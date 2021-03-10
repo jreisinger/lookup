@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"os"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/miekg/dns"
@@ -28,7 +27,7 @@ func main() {
 		log.Fatalln("missing FQDN to lookup")
 	}
 
-	fqdn := flag.Arg(0)
+	var fqdn = flag.Arg(0)
 	var stats Stats
 	var servers Nameservers
 
@@ -44,10 +43,11 @@ func main() {
 	if *n != 0 {
 		servers = servers[:*n]
 	}
+
 	stats.totalServers = len(servers)
 
-	var wg sync.WaitGroup
 	serversCh := make(chan string)
+	resultsCh := make(chan Stats)
 
 	t := strings.ToUpper(*t)
 	dnsType := dns.StringToType[t]
@@ -57,32 +57,32 @@ func main() {
 
 	// Spin up 100 workers to make lookups.
 	for i := 0; i < 100; i++ {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			for s := range serversCh {
-				lookup(fqdn, s, &stats, dnsType)
-			}
-		}()
+		go worker(fqdn, dnsType, serversCh, resultsCh)
 	}
 
 	// Send workers servers to make lookups at.
-	wg.Add(1)
 	go func() {
-		defer wg.Done()
-		defer close(serversCh)
 		for _, s := range servers {
 			serversCh <- s
 		}
 	}()
 
-	wg.Wait()
+	for range servers {
+		s := <-resultsCh
+		stats.failedServers += s.failedServers
+		stats.totalResponses += s.totalResponses
+		stats.failedResponses += s.failedResponses
+		stats.emptyResponses += s.emptyResponses
+	}
+
+	close(serversCh)
+	close(resultsCh)
+
 	stats.printSummary()
 }
 
 // Stats holds statistics about DNS responses.
 type Stats struct {
-	sync.Mutex
 	totalServers    int
 	failedServers   int
 	totalResponses  int
@@ -166,7 +166,15 @@ func (n *Nameservers) getPublic(url string) error {
 	return nil
 }
 
-func lookup(fqdn, server string, stats *Stats, dnsType uint16) {
+func worker(fqdn string, dnsType uint16, servers chan string, results chan Stats) {
+	for server := range servers {
+		stats := lookup(fqdn, server, dnsType)
+		results <- stats
+	}
+}
+
+func lookup(fqdn, server string, dnsType uint16) Stats {
+	var stats Stats
 	c := new(dns.Client)
 
 	m := new(dns.Msg)
@@ -175,24 +183,18 @@ func lookup(fqdn, server string, stats *Stats, dnsType uint16) {
 
 	r, _, err := c.Exchange(m, net.JoinHostPort(server, "53"))
 	if r == nil { // server issues
-		stats.Lock()
 		stats.failedServers++
-		stats.Unlock()
 		fmt.Printf("querying %-15s %v\n", server, err.Error())
-		return
+		return stats
 	}
 
-	stats.Lock()
 	stats.totalResponses++
-	stats.Unlock()
 
 	nRRs := len(r.Answer)
 	rCode := dns.RcodeToString[r.Rcode]
 
 	if rCode != "NOERROR" {
-		stats.Lock()
 		stats.failedResponses++
-		stats.Unlock()
 	}
 
 	format := "querying %-15s %d RR"
@@ -203,9 +205,9 @@ func lookup(fqdn, server string, stats *Stats, dnsType uint16) {
 	fmt.Printf(format, server, nRRs, rCode)
 
 	if nRRs < 1 {
-		stats.Lock()
 		stats.emptyResponses++
-		stats.Unlock()
-		return
+		return stats
 	}
+
+	return stats
 }
