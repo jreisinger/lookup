@@ -23,13 +23,13 @@ func main() {
 	log.SetPrefix(os.Args[0] + ": ")
 	log.SetFlags(0) // no timestamp
 
-	if len(flag.Args()) < 1 {
-		log.Fatalln("missing FQDN to lookup")
+	if len(flag.Args()) != 1 {
+		log.Fatalf("supply one FQDN (e.g. example.com) to look up")
 	}
 
 	var fqdn = flag.Arg(0)
-	var stats Stats
-	var servers Nameservers
+	var stats statistics
+	var servers nameservers
 
 	servers.add("1.1.1.1", "1.0.0.1") // Cloudflare
 	servers.add("8.8.8.8", "8.8.4.4") // Google
@@ -47,7 +47,7 @@ func main() {
 	stats.totalServers = len(servers)
 
 	serversCh := make(chan string)
-	resultsCh := make(chan Stats)
+	resultsCh := make(chan statistics)
 
 	t := strings.ToUpper(*t)
 	dnsType := dns.StringToType[t]
@@ -81,8 +81,8 @@ func main() {
 	stats.printSummary()
 }
 
-// Stats holds statistics about DNS responses.
-type Stats struct {
+// statistics holds statistics about DNS responses.
+type statistics struct {
 	totalServers    int
 	failedServers   int
 	totalResponses  int
@@ -90,9 +90,9 @@ type Stats struct {
 	emptyResponses  int
 }
 
-func (s *Stats) printSummary() {
+func (s *statistics) printSummary() {
 	fmt.Printf("%s\n", strings.Repeat("-", 40))
-	format := "%-24s %2.0f%% (%d/%d)\n"
+	format := "%-24s %4.0f%% (%d/%d)\n"
 	fmt.Printf(format, "Failed nameservers",
 		s.failedServersPercentage(), s.failedServers, s.totalServers)
 	fmt.Printf(format, "Failed responses",
@@ -101,26 +101,26 @@ func (s *Stats) printSummary() {
 		s.emptyResponsesPercentage(), s.emptyResponses, s.totalResponses-s.failedResponses)
 }
 
-func (s *Stats) failedServersPercentage() float64 {
+func (s *statistics) failedServersPercentage() float64 {
 	return float64(s.failedServers) / float64(s.totalServers) * 100
 }
 
-func (s *Stats) failedResponsesPercentage() float64 {
+func (s *statistics) failedResponsesPercentage() float64 {
 	return float64(s.failedResponses) / float64(s.totalResponses) * 100
 }
 
-func (s *Stats) emptyResponsesPercentage() float64 {
+func (s *statistics) emptyResponsesPercentage() float64 {
 	return float64(s.emptyResponses) / float64(s.totalResponses-s.failedResponses) * 100
 }
 
-// Nameservers to make lookups against.
-type Nameservers []string
+// nameservers to make lookups against.
+type nameservers []string
 
-func (n *Nameservers) add(servers ...string) {
+func (n *nameservers) add(servers ...string) {
 	*n = append(*n, servers...)
 }
 
-func (n *Nameservers) dedup() {
+func (n *nameservers) dedup() {
 	orig := *n
 	*n = []string{} // empty the slice
 	seen := make(map[string]struct{})
@@ -133,7 +133,7 @@ func (n *Nameservers) dedup() {
 	}
 }
 
-func (n *Nameservers) getLocal() error {
+func (n *nameservers) getLocal() error {
 	config, err := dns.ClientConfigFromFile("/etc/resolv.conf")
 	if err != nil {
 		return err
@@ -142,7 +142,7 @@ func (n *Nameservers) getLocal() error {
 	return nil
 }
 
-func (n *Nameservers) getPublic(url string) error {
+func (n *nameservers) getPublic(url string) error {
 	client := &http.Client{Timeout: 5 * time.Second}
 	resp, err := client.Get(url)
 	if err != nil {
@@ -166,15 +166,15 @@ func (n *Nameservers) getPublic(url string) error {
 	return nil
 }
 
-func worker(fqdn string, dnsType uint16, servers chan string, results chan Stats) {
+func worker(fqdn string, dnsType uint16, servers chan string, results chan statistics) {
 	for server := range servers {
 		stats := lookup(fqdn, server, dnsType)
 		results <- stats
 	}
 }
 
-func lookup(fqdn, server string, dnsType uint16) Stats {
-	var stats Stats
+func lookup(fqdn, server string, dnsType uint16) statistics {
+	var stats statistics
 	c := new(dns.Client)
 
 	m := new(dns.Msg)
@@ -184,7 +184,7 @@ func lookup(fqdn, server string, dnsType uint16) Stats {
 	r, _, err := c.Exchange(m, net.JoinHostPort(server, "53"))
 	if r == nil { // server issues
 		stats.failedServers++
-		fmt.Printf("querying %-15s %v\n", server, err.Error())
+		fmt.Printf("lookup at %-15s %v\n", server, err.Error())
 		return stats
 	}
 
@@ -195,18 +195,18 @@ func lookup(fqdn, server string, dnsType uint16) Stats {
 
 	if rCode != "NOERROR" {
 		stats.failedResponses++
+		fmt.Printf("lookup at %-15s %v\n", server, rCode)
+		return stats
 	}
 
-	format := "querying %-15s %d RR"
+	format := "lookup at %-15s %d RR"
 	if nRRs == 0 || nRRs > 1 {
 		format += "s"
 	}
-	format += " (%s)\n"
-	fmt.Printf(format, server, nRRs, rCode)
+	fmt.Printf(format+"\n", server, nRRs)
 
 	if nRRs < 1 {
 		stats.emptyResponses++
-		return stats
 	}
 
 	return stats
